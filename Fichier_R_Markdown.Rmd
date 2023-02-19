@@ -1,0 +1,488 @@
+---
+title: "Projet_Tutore"
+author: "Roland Koffi & Gerald Miezan"
+date: '2022-04-22'
+output: html_document
+---
+
+```{r }
+# Chargement des librairies
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(skimr)
+library(ggplot2)
+library(naniar)
+library(lubridate)
+library(factoextra)
+library(impute)
+library(corrplot)
+library(PerformanceAnalytics)
+library(gplots)
+library(questionr)
+```
+
+```{r}
+# Chargement des données
+
+table_prime <- read_excel("datasets/new_table_prime.xlsx", sheet = "table_prime", na = c("", "Inconnu", "INCONNU", "inconnu", "NA"))
+
+table_sinistre <- read_excel("datasets/table_sinistre.xlsx", sheet = "Sheet2", na = c("", "Inconnu", "INCONNU", "inconnu", "NA"))
+table_sinistre <- select(table_sinistre, c("Id_Police_Risque_Echeance","NBSIN", "PAYE_NET","SAP_NET","CHARGE_NETTE"))
+
+table_usage <- read_delim("datasets/table_usage.csv", delim = ";", col_names = TRUE, na = c("", "Inconnu", "INCONNU", "inconnu", "NA"))
+
+table_codegenau <- read_delim("datasets/table_codegenau.csv", delim = ";", col_names = TRUE, locale = locale(encoding = "UTF-8"), na = c("", "Inconnu", "INCONNU", "inconnu", "NA"))
+```
+
+```{r}
+gg_miss_var(table_prime, show_pct = T)
+```
+
+
+```{r}
+# Quelques statistiques sur les données
+
+# Table prime
+summary(table_prime)
+
+# Table sinistre
+summary(table_sinistre)
+```
+
+```{r}
+
+# Table prime renommer colonne table prime
+table_prime <- table_prime %>% rename(TARIF_MOYEN_RC = PRIMNETT)
+
+# Pour la table prime Transtypage des données
+table_prime$CODE_USAGE <- as.character(table_prime$CODE_USAGE)
+table_prime$LIBTYPIN <- as.factor(table_prime$LIBTYPIN)
+table_prime$ANNEE <- as.factor(table_prime$ANNEE)
+table_prime$NUMEPOLI <- as.numeric(table_prime$NUMEPOLI)
+table_prime$CODECATE <- as.factor(table_prime$CODECATE)
+table_prime$LIBECATE <- as.factor(table_prime$LIBECATE)
+table_prime$CODEINTE <- as.factor(table_prime$CODEINTE)
+table_prime$DATEEFFE <- as.Date(table_prime$DATEEFFE)
+table_prime$DATEECHE <- as.Date(table_prime$DATEECHE)
+table_prime$DATE_MEC <- as.factor(table_prime$DATE_MEC)
+table_prime$MARQVEHI <- as.factor(table_prime$MARQVEHI)
+table_prime$TYPEVEHI <- as.factor(table_prime$TYPEVEHI)
+table_prime$RAISOCIN <- as.factor(table_prime$RAISOCIN)
+table_prime$CODEGARA <- as.factor(table_prime$CODEGARA)
+table_prime$TYPEMOTE <- as.factor(table_prime$TYPEMOTE)
+table_prime$CODEZONE <- as.factor(table_prime$CODEZONE)
+table_prime$CODE_USAGE <- as.factor(as.numeric(table_prime$CODE_USAGE))
+table_prime$CODGENAU <- as.factor(table_prime$CODGENAU)
+table_prime$FLOTTE <- as.factor(table_prime$FLOTTE)
+table_prime$PUISVEHICAT <- as.factor(table_prime$PUISVEHICAT)
+table_prime$TARIF_MOYEN_RC <- as.numeric(table_prime$TARIF_MOYEN_RC)
+table_prime$NOMBPLAC <- as.numeric(table_prime$NOMBPLAC)
+table_prime$POIDVEHI <- as.numeric(table_prime$POIDVEHI, na.rm = TRUE)
+
+# Table sinistre Transtypage des données
+table_sinistre$CHARGE_NETTE <- as.numeric(table_sinistre$CHARGE_NETTE)
+
+# Aujout de la colonne COUT_MOYEN_SINISTRE dans la table 
+table_sinistre <- table_sinistre %>% mutate(COUT_MOYEN_SINISTRE = CHARGE_NETTE/NBSIN)
+
+# Aujout de la colonne EXPOSITION Table prime
+table_prime <- table_prime %>% mutate(EXPOSITION = DATEECHE - DATEEFFE)
+
+
+# Pour la table prime Transtypage des données
+table_prime$EXPOSITION <- as.numeric(table_prime$EXPOSITION)
+
+```
+
+```{r}
+# Visulalisation des donnée manquantes
+
+# table prime
+gg_miss_var(table_prime, show_pct = TRUE)
+
+# table sinistre
+gg_miss_var(table_sinistre, show_pct = TRUE)
+```
+
+```{r}
+# Jointure des tables sinistres et des tables primes
+
+dataset <- table_prime %>% left_join(table_sinistre)
+```
+```{r}
+### Imputation de colonnes
+
+## Table dataset
+dataset$NBSIN[is.na(dataset$NBSIN)] <- 0
+dataset$PAYE_NET[is.na(dataset$PAYE_NET)] <- 0
+dataset$SAP_NET[is.na(dataset$SAP_NET)] <- 0
+dataset$CHARGE_NETTE[is.na(dataset$CHARGE_NETTE)] <- 0
+dataset$COUT_MOYEN_SINISTRE[is.na(dataset$COUT_MOYEN_SINISTRE)] <- 0
+```
+
+```{r}
+# Statistiques sur les données
+summary(dataset)
+```
+
+```{r}
+# Variables tarifaires
+dataset_var_to_imp <- dataset %>% select(NUMEPOLI,CODE_USAGE,TYPEMOTE,NOMBPLAC,POIDVEHI,CODEZONE,TARIF_MOYEN_RC,PUISVEHICAT,CODGENAU)
+
+
+# Classes de quelques variables du dataset pour l'imputation
+classe_var_code_usage <- c("401", "402", "403", "404", "405", "406", "407", "408", "409", "410", "412", "415")
+classe_var_puisvehi <- c("1", "10", "11", "12 et plus", "2", "3", "4", "5", "6", "7", "8", "9")
+classe_var_typemote <- c("D", "E")
+classe_var_codezone <- c("1", "2", "3")
+classe_var_codgenau <- c("2R", "3R", "4R", "AC", "AR", "EC", "PR", "QR", "RM", "SR", "TB", "TD", "TG", "TR", "V1", "V2", "VP", "VS", "VU", "XC")
+
+# Declasser les variables factorielles
+dataset_var_declass <- as.data.frame(sapply(dataset_var_to_imp, unclass))
+
+# Selection des Min et des Max des variables quantitatives
+min_max_var_to_imp <- tibble(Valeurs= c("Moyenne","Ecart-Type"), CODE_USAGE = c(mean(dataset_var_declass$CODE_USAGE,na.rm = TRUE), sd(dataset_var_declass$CODE_USAGE, na.rm = TRUE)), TYPEMOTE = c(mean(dataset_var_declass$TYPEMOTE, na.rm = TRUE), sd(dataset_var_declass$TYPEMOTE, na.rm = TRUE)), NOMBPLAC = c(mean(dataset_var_declass$NOMBPLAC, na.rm = TRUE), sd(dataset_var_declass$NOMBPLAC, na.rm = TRUE)), POIDVEHI = c(mean(dataset_var_declass$POIDVEHI, na.rm = TRUE),  sd(dataset_var_declass$POIDVEHI, na.rm = TRUE)), CODEZONE = c(mean(dataset_var_declass$CODEZONE, na.rm = TRUE), sd(dataset_var_declass$CODEZONE,na.rm = TRUE)), TARIF_MOYEN_RC  = c(mean(dataset_var_declass$TARIF_MOYEN_RC, na.rm = TRUE),  sd(dataset_var_declass$TARIF_MOYEN_RC, na.rm = TRUE)), PUISVEHICAT  = c(mean(dataset_var_declass$PUISVEHICAT, na.rm = TRUE),  sd(dataset_var_declass$PUISVEHICAT, na.rm = TRUE)), CODGENAU  = c(mean(dataset_var_declass$CODGENAU, na.rm = TRUE),  sd(dataset_var_declass$CODGENAU, na.rm = TRUE)))
+
+# Standardiser par la moyenne et l'ecart-type
+dataset_var_declass_centr <- scale(dataset_var_declass, center = TRUE)
+
+# Imputation des valeurs
+#dataset_tarif_declass_imp <- knnImputation(dataset_tarif_declass, k = 10, scale = FALSE, meth = 'median')
+dataset_var_declass_imp <- impute.knn(dataset_var_declass_centr, k=10, colmax = 0.89, maxp = 15000)
+dataset_var_declass_imp <- as.data.frame(dataset_var_declass_imp$data)
+
+
+
+# Fonction pour de-standardiser
+fonct_des <- function(x,moy,ec_t) {
+  val <- moy + x*ec_t
+  return(val)
+}
+
+# Vectorisation de la fonction
+destand <- Vectorize(fonct_des)
+
+dataset_var_declass$TARIF_MOYEN_RC <- round(destand(dataset_var_declass_imp$TARIF_MOYEN_RC,min_max_var_to_imp[1,7],min_max_var_to_imp[2,7]))
+dataset_var_declass$NOMBPLAC <- round(destand(dataset_var_declass_imp$NOMBPLAC,min_max_var_to_imp[1,4],min_max_var_to_imp[2,4]))
+dataset_var_declass$POIDVEHI <- round(destand(dataset_var_declass_imp$POIDVEHI,min_max_var_to_imp[1,5],min_max_var_to_imp[2,5]),2)
+dataset_var_declass$CODEZONE <- destand(dataset_var_declass_imp$CODEZONE,min_max_var_to_imp[1,6],min_max_var_to_imp[2,6])
+dataset_var_declass$CODE_USAGE <- destand(dataset_var_declass_imp$CODE_USAGE,min_max_var_to_imp[1,2],min_max_var_to_imp[2,2])
+dataset_var_declass$TYPEMOTE <- destand(dataset_var_declass_imp$TYPEMOTE,min_max_var_to_imp[1,3],min_max_var_to_imp[2,3])
+dataset_var_declass$PUISVEHICAT <- round(destand(dataset_var_declass_imp$PUISVEHICAT,min_max_var_to_imp[1,8],min_max_var_to_imp[2,8]))
+dataset_var_declass$CODGENAU <- round(destand(dataset_var_declass_imp$CODGENAU,min_max_var_to_imp[1,9],min_max_var_to_imp[2,9]))
+
+
+dataset_var_declass_num <- dataset_var_declass
+
+```
+
+```{r}
+# Convertir en facteur les variables déclassées
+dataset_var_declass$CODE_USAGE <- as.factor(dataset_var_declass$CODE_USAGE)
+levels(dataset_var_declass$CODE_USAGE) <- classe_var_code_usage
+
+dataset_var_declass$PUISVEHICAT <- as.factor(dataset_var_declass$PUISVEHICAT)
+levels(dataset_var_declass$PUISVEHICAT) <- classe_var_puisvehi
+
+dataset_var_declass$TYPEMOTE <- as.factor(dataset_var_declass$TYPEMOTE)
+levels(dataset_var_declass$TYPEMOTE) <- classe_var_typemote
+
+dataset_var_declass$CODEZONE <- as.factor(dataset_var_declass$CODEZONE)
+levels(dataset_var_declass$CODEZONE) <- classe_var_codezone
+
+dataset_var_declass$CODGENAU <- as.factor(dataset_var_declass$CODGENAU)
+levels(dataset_var_declass$CODGENAU) <- classe_var_codgenau
+```
+
+
+```{r}
+# Remplacement des valeurs dans la table des primes positives
+dataset_var_to_imp[,c("NUMEPOLI","CODE_USAGE","TYPEMOTE","NOMBPLAC","POIDVEHI","CODEZONE","TARIF_MOYEN_RC","PUISVEHICAT","CODGENAU")] <- dataset_var_declass
+dataset[,c("NUMEPOLI","CODE_USAGE","TYPEMOTE","NOMBPLAC","POIDVEHI","CODEZONE","TARIF_MOYEN_RC","PUISVEHICAT","CODGENAU")] <- dataset_var_to_imp
+
+summary(dataset)
+```
+
+```{r}
+# Nouveau dataset avec tarif moyen RC >= 0
+dataset_tRC_pos <- dataset %>% filter(TARIF_MOYEN_RC >= 0)
+
+# Nouveau dataset avec tarif moyen RC < 0
+dataset_tRC_neg <- dataset %>% filter(TARIF_MOYEN_RC < 0)
+```
+
+```{r}
+# Résummé sur les données 
+
+# Dataset avec tarif moyen RC >= 0
+summary(dataset_tRC_pos)
+
+# Dataset avec tarif moyen RC < 0
+summary(dataset_tRC_neg)
+```
+
+```{r}
+# Conversion de la colonne exposition en jour
+#dataset_tRC_pos$EXPOSITION <- dataset_tRC_pos$EXPOSITION/86400
+
+# Ajout de la colonne GAIN_PAR_CONTRAT dans la table dataset_tRC_pos
+dataset <- dataset_tRC_pos %>% mutate(GAIN_PAR_CONTRAT = round(((TARIF_MOYEN_RC/365)*EXPOSITION)-SAP_NET))
+```
+
+```{r}
+## Visualisation des valeurs manquantes
+# Table dataset_tRC_pos
+gg_miss_var(dataset_tRC_pos, show_pct = FALSE)
+```
+```{r}
+# Suppression des deux valeurs manquantes du dataset_tRC_pos
+dataset_tRC_pos <- na.omit(dataset_tRC_pos)
+```
+
+```{r}
+## Visualisation des valeurs manquantes
+# Table dataset_tRC_pos
+gg_miss_var(dataset_tRC_pos, show_pct = FALSE)
+```
+
+```{r}
+# Matrice de correlation entre les variables tarifaires
+cor_tarif <- cor(dataset_var_declass_num[,c("CODE_USAGE","TYPEMOTE","NOMBPLAC","POIDVEHI","CODEZONE")])
+#print(dataset_var_declass_num)
+corrplot(cor_tarif)
+```
+
+```{r}
+# Matrice de correlation entre les variables tarifaires
+chart.Correlation(dataset_tarif_declass_num[,c("CODE_USAGE","TYPEMOTE","NOMBPLAC","POIDVEHI","CODEZONE")], histogram = TRUE, method = "pearson")
+```
+
+```{r}
+# Correlations entre les variables non tarifaires
+dataset_var_non_tarifaire <- dataset_tRC_pos %>% select(DATE_MEC,MARQVEHI,TYPEVEHI,CODGENAU,PUISVEHICAT)
+
+# test de Khi_deux entre MARQVEHI et DATE_MEC
+marq_date= table(dataset_var_non_tarifaire$MARQVEHI, dataset_var_non_tarifaire$DATE_MEC)
+chisq.test(date_marq)
+
+# test de Khi_deux entre PUISVEHI et MARQVEHI
+puis_marq = table(dataset_var_non_tarifaire$PUISVEHICAT, dataset_var_non_tarifaire$MARQVEHI)
+chisq.test(puis_marq)
+
+# test de Khi_deux entre CODGENAU et DATE_MEC
+codgenau_date = table(dataset_var_non_tarifaire$CODGENAU, dataset_var_non_tarifaire$DATE_MEC)
+chisq.test(codgenau_date)
+
+```
+
+```{r}
+### Liens existants pour les variables non tarifaires
+
+# Variable Tarif Moyen RC
+tar_moy_rc_non_tarif <- aov(dataset_tRC_pos$TARIF_MOYEN_RC ~  dataset_tRC_pos$CODGENAU + dataset_tRC_pos$PUISVEHICAT, data = dataset_tRC_pos)
+summary(tar_moy_rc_non_tarif)
+
+# Variable Exposition
+expo_non_tarif <- aov(dataset_tRC_pos$EXPOSITION ~ dataset_tRC_pos$CODGENAU + dataset_tRC_pos$PUISVEHICAT, data = dataset_tRC_pos)
+summary(expo_non_tarif)
+
+# Variable Nombre et Cot moyen de sinistre
+cout_moy_non_tarif <- aov(dataset_tRC_pos$COUT_MOYEN_SINISTRE ~ dataset_tRC_pos$CODGENAU + dataset_tRC_pos$PUISVEHICAT, data = dataset_tRC_pos)
+summary(cout_moy_non_tarif)
+
+
+### Liens existants pour les variables tarifaires
+tar_moy_rc_tarif <- 
+
+
+
+
+
+
+```
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
